@@ -1,0 +1,121 @@
+services:
+  loki:
+    image: grafana/loki:3.0.0
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/loki.yaml
+    volumes:
+      - ./loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    networks:
+      - loki
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    env_file: .env
+    user: "${USER_ID}:${GROUP_ID}"
+    ports:
+      - "3000:3000"
+    volumes:
+      # - ./grafana.ini:/etc/grafana/grafana.ini:ro
+      - ./grafana-datasources.yaml:/etc/grafana/provisioning/datasources/grafana-datasources.yaml:ro
+      - ./grafana-data:/var/lib/grafana
+    environment:
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"        # sendet sonst an stats.grafana.org
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"        # GitHub version check
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false" # grafana.com plugin update check
+      GF_ANALYTICS_ENABLED: "false" # optional (UI/DB-Usage-Analytics komplett aus, falls du das auch nicht willst):
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "reverse_proxy"
+      traefik.http.routers.grafana.rule: "${TRAEFIK_HTTP_ROUTERS_GRAFANA_RULE}"
+      # traefik.http.middlewares.compress.compress: "true"
+      # traefik.http.routers.myapp.middlewares: ratelimit-per-ip@file"
+      #traefik.http.routers.grafana.entrypoints: "websecure"
+      #traefik.http.routers.grafana.tls: "true"
+      #traefik.http.services.grafana.loadbalancer.server.port: "3000"
+    networks:
+      - loki
+      - reverse_proxy
+
+  grafana-alloy:
+    image: grafana/alloy:v1.13.0
+    # container_name: alloy
+#     env_file: .env
+#    environment:
+#      - FOO=BAR
+#    user: "${USER_ID}:${GROUP_ID}"
+    # network_mode: 'bridge'
+    ports:
+      - '12345:12345'
+    volumes:
+      - ./config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy/data
+      # Next line needed so that alloy can read all-logs:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: 'unless-stopped'
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - --disable-reporting=true       # Opt-out
+      # - --disable-support-bundle=true  # Out-out
+      - /etc/alloy/config.alloy
+    depends_on:
+      - loki
+    networks:
+      - loki
+
+  prometheus:
+    image: prom/prometheus:v3.9.1
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+    networks:
+      - loki
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.10.2
+    volumes:
+      - '/:/host:ro,rslave'
+    networks:
+      - loki
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.55.1
+    networks:
+      - loki
+    #devices:
+    #  - /dev/nvme0n1p2:/dev/nvme0n1p2
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      # - /dev/disk:/dev/disk:ro
+      # cadvisor over btrfs filesystem requires more access than just disk
+      - /dev:/dev:ro
+    restart: unless-stopped
+
+volumes:
+  alloy-data:
+  prometheus-data:
+  loki-data:
+
+# Optional - may be necessary for docker healthcheck to pass if running in host network mode
+#    extra_hosts:
+#      - 'host.docker.internal:host-gateway'
+networks:
+  loki:
+  reverse_proxy:
+    external: true
+    name: reverse_proxy
+

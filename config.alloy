@@ -1,0 +1,110 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+discovery.docker "local" {
+  host = "unix:///var/run/docker.sock"
+}
+
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  // targets    = discovery.docker.local.targets
+  targets    = discovery.relabel.custom_rules.output
+  forward_to = [loki.process.add_min_labels.receiver]
+}
+
+discovery.relabel "custom_rules" {
+  targets = discovery.docker.local.targets
+
+  // drop kubernetes container (if any)
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "k8s_.*"
+    action        = "drop"
+  }
+
+  // drop observability containers (prevents logging dashboard interactions)
+  /*
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = ".*(grafana|loki|alloy|prometheus|cadvisor|traefik).*"
+    action        = "drop"
+  }
+  */
+
+  // PROMOTE container name into a real label Loki will index
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    target_label  = "container_name"
+    action        = "replace"
+  }
+
+  // Compose project (parent folder)
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+    action        = "replace"
+  }
+
+  // Compose service (e.g. "traefik", "my_app")
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+    action        = "replace"
+  }
+
+  // Optional: Compose container number (e.g. "1")
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_container_number"]
+    target_label  = "compose_container"
+    action        = "replace"
+  }
+
+  // Optional: Docker image name/tag
+  rule {
+    source_labels = ["__meta_docker_container_image"]
+    target_label  = "image"
+    action        = "replace"
+  }
+
+  // Optional: Container ID (there can be many - only if really desired)
+  /*
+  rule {
+    source_labels = ["__meta_docker_container_id"]
+    target_label  = "container_id"
+    action        = "replace"
+  }
+  */
+}
+
+/**
+ * Fallback: Ensure every Loki stream has at least one label.
+ * Loki rejects streams with an empty label set ("at least one label pair is required per stream").
+ * We add a minimal static label so ingestion keeps working even if upstream labels are missing.
+ */
+loki.process "add_min_labels" {
+  forward_to = [loki.write.loki.receiver]
+
+  // Optional: Filter out certain log levels of certain containers.
+  /*
+  stage.match {
+    selector = "{container_name=~\".*loki.*\"} |~ \"level=(debug|info)\""
+    action   = "drop"
+  }
+  */
+
+  stage.static_labels {
+    values = {
+      job = "docker",
+    }
+  }
+}
+
+
