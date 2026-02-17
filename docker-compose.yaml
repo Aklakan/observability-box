@@ -6,7 +6,7 @@ services:
     command: -config.file=/etc/loki/loki.yaml
     volumes:
       - ./loki.yaml:/etc/loki/loki.yaml:ro
-      - loki-data:/loki
+      - "${MOUNT_LOKI:-loki-data}:/loki"
     networks:
       - loki
 
@@ -19,7 +19,7 @@ services:
     volumes:
       # - ./grafana.ini:/etc/grafana/grafana.ini:ro
       - ./grafana-datasources.yaml:/etc/grafana/provisioning/datasources/grafana-datasources.yaml:ro
-      - ./grafana-data:/var/lib/grafana
+      - "${MOUNT_GRAFANA:-./grafana-data}:/var/lib/grafana"
     environment:
       GF_AUTH_BASIC_ENABLED: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "true"
@@ -53,7 +53,7 @@ services:
       - '12345:12345'
     volumes:
       - ./config.alloy:/etc/alloy/config.alloy:ro
-      - alloy-data:/var/lib/alloy/data
+      - "${MOUNT_ALLOY:-alloy-data}:/var/lib/alloy/data"
       # Next line needed so that alloy can read all-logs:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: 'unless-stopped'
@@ -73,7 +73,7 @@ services:
     image: prom/prometheus:v3.9.1
     volumes:
       - ./prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
-      - prometheus-data:/prometheus
+      - "${MOUNT_PROMETHEUS:-prometheus-data}:/prometheus"
     command:
       - --config.file=/etc/prometheus/prometheus.yaml
       - --storage.tsdb.path=/prometheus
